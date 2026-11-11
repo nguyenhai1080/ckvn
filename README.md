@@ -33,7 +33,9 @@ Chưa cấu hình Supabase thì trang vẫn chạy bình thường ở chế đ�
 gh repo create luot-song-ck --public --source . --push
 ```
 
-VibeHost: chọn repo, nhánh `main`, thư mục xuất bản `.`, **không có lệnh build**. Nhớ bật chế độ công khai.
+VibeHost: chọn repo, nhánh `main`. VibeHost nhận diện đây là app Node và chạy `npm start` → `server.mjs`
+(server tĩnh không cần thư viện, nghe cổng `PORT`, health check ở `/healthz`). Không có lệnh build. Nhớ bật chế độ công khai.
+Nếu nền tảng cho chọn "Static site" thì cũng được: thư mục xuất bản `.`.
 Ghi lại địa chỉ trang, VD `https://luot-song-ck.vibehost.app/` (dùng ở các bước sau, gọi là `SITE_URL`).
 
 ### 2. Supabase
