@@ -1,0 +1,12 @@
+{
+  "name": "luot-song-ck",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bộ lọc & tín hiệu lướt sóng cổ phiếu Việt Nam (trang tĩnh)",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "update": "node scripts/update-data.mjs",
+    "check": "node -e \"globalThis.window={};await import('./data.js');console.log(window.DATA.asof, window.DATA.r.length + ' mã')\""
+  }
+}
