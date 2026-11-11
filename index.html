@@ -97,6 +97,26 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
 .muted{color:var(--ink-3)}
 .foot{margin-top:24px;font-size:12px;color:var(--ink-3)}
 .view{display:none}.view.on{display:block}
+.tabs{flex-wrap:wrap}
+.day{display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:13px;color:var(--ink-2)}
+.day select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}
+.banner.old{background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.banner.old a{color:var(--accent);font-weight:600}
+.perf-kpis{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:12px}
+.acc-grid{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.acc{max-width:520px}.acc h2{margin-bottom:8px}.acc p{margin:6px 0}
+.form{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2);font-weight:500}
+.form input{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;padding:8px 14px}
+.btn.sm{padding:3px 9px;font-size:12px}.btn:disabled{opacity:.6;cursor:default}
+.form-msg{font-size:13px;color:var(--ink-2);margin:0;min-height:1em}.form-msg.bad{color:var(--crit)}
+.chk{display:flex;gap:8px;align-items:flex-start;margin:7px 0;font-size:13.5px;cursor:pointer}.chk input{margin-top:3px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.tg{margin:8px 0}
+.logs{list-style:none;padding:0;margin:0;font-size:13px}.logs li{padding:7px 0;border-bottom:1px solid var(--line)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--ink);color:var(--surface);padding:9px 14px;border-radius:9px;font-size:13px;opacity:0;transition:.2s;pointer-events:none;z-index:20;max-width:calc(100% - 32px)}
+.toast.show{opacity:1;transform:translate(-50%,0)}.toast.bad{background:var(--crit);color:#fff}
+@media(max-width:600px){.wrap{padding:16px 16px 48px}.tabs a{padding:6px 10px;font-size:13px}}
 </style>
 </head>
 <body>
@@ -105,12 +125,15 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
     <div>
       <h1>Lướt sóng CK</h1>
       <div class="sub" id="sub"></div>
+      <div id="dayline"></div>
     </div>
     <nav class="tabs" id="tabs">
       <a href="#tin-hieu" data-v="tin-hieu">Tín hiệu hôm nay</a>
       <a href="#bo-loc" data-v="bo-loc">Bộ lọc cổ phiếu</a>
       <a href="#theo-doi" data-v="theo-doi">Danh mục theo dõi</a>
+      <a href="#hieu-qua" data-v="hieu-qua">Hiệu quả tín hiệu</a>
       <a href="#phuong-phap" data-v="phuong-phap">Phương pháp</a>
+      <a href="#tai-khoan" data-v="tai-khoan" id="tab-acc">Đăng nhập</a>
     </nav>
   </header>
 
@@ -145,8 +168,17 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
   </section>
 
   <section class="view" id="v-theo-doi">
-    <p class="count" id="wl-note">Bấm ★ ở bảng Bộ lọc hoặc trong chi tiết mã để thêm vào danh mục theo dõi. Danh mục lưu trên trình duyệt này.</p>
+    <p class="count" id="wl-note">Bấm ★ ở bảng Bộ lọc hoặc trong chi tiết mã để thêm vào danh mục theo dõi. Danh mục lưu trên trình duyệt này; <a href="#tai-khoan">đăng nhập</a> để đồng bộ giữa các thiết bị và nhận cảnh báo.</p>
     <div class="grid sigs" id="wl"></div>
+  </section>
+
+  <section class="view" id="v-hieu-qua">
+    <h2>Hiệu quả thực tế của tín hiệu</h2>
+    <div id="perf"></div>
+  </section>
+
+  <section class="view" id="v-tai-khoan">
+    <div id="account"></div>
   </section>
 
   <section class="view method" id="v-phuong-phap">
@@ -189,8 +221,23 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
 <aside class="drawer" id="drawer" aria-label="Chi tiết mã"></aside>
 
 <script src="data.js"></script>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="cloud.js"></script>
 <script>
-const D = window.DATA, K = D.k;
+async function boot() {
+  let D = window.DATA;
+  const want = new URLSearchParams(location.search).get('d');
+  if (want && want !== D.asof && Cloud.enabled) {
+    try { const snap = await Cloud.loadSnapshot(want); if (snap) D = snap; } catch (e) { console.warn('Không tải được phiên', want, e); }
+  }
+  main(D);
+  Cloud.init({ asof: D.asof, latest: window.DATA.asof });
+}
+
+function main(D) {
+const K = D.k;
+const LATEST = D.asof === window.DATA.asof;
 const rows = D.r.map(r => Object.fromEntries(K.map((k, i) => [k, r[i]])));
 const bySym = Object.fromEntries(rows.map(r => [r.s, r]));
 const $ = s => document.querySelector(s);
@@ -211,14 +258,15 @@ const badge = rec => `<span class="badge b-${rec.split(' ')[0]}">${{ 'MUA': '▲
 let WL = [];
 try { WL = JSON.parse(localStorage.getItem('lsck-wl') || '[]'); } catch (e) {}
 const saveWL = () => { try { localStorage.setItem('lsck-wl', JSON.stringify(WL)); } catch (e) {} };
-const toggleWL = s => { WL = WL.includes(s) ? WL.filter(x => x !== s) : [...WL, s]; saveWL(); renderTable(); renderWL(); };
+const toggleWL = s => { const add = !WL.includes(s); WL = add ? [...WL, s] : WL.filter(x => x !== s); saveWL(); Cloud.setWatch(s, add); renderTable(); renderWL(); };
+Cloud.bindWatchlist({ get: () => WL, set: list => { WL = [...new Set(list)]; saveWL(); renderTable(); renderWL(); } });
 
 // Header + market
 const V = D.vni;
 $('#sub').innerHTML = `Dữ liệu phiên <b>${D.asof.split('-').reverse().join('/')}</b> · ${rows.length} cổ phiếu thanh khoản ≥ 10 tỷ/phiên · Nguồn: VNDirect`;
-$('#banner').innerHTML = V.ok
+$('#banner').innerHTML = (LATEST ? '' : `<div class="banner old">🕘 <div>Đang xem dữ liệu phiên <b>${D.asof.split('-').reverse().join('/')}</b> (phiên cũ). Giá và tín hiệu là của ngày đó. <a href="${location.pathname}${location.hash}">Về phiên mới nhất →</a></div></div>`) + (V.ok
   ? `<div class="banner ok">✔ <div><b>Thị trường thuận lợi:</b> VN-Index trên MA50 – các tín hiệu MUA đang được kích hoạt.</div></div>`
-  : `<div class="banner warn">⚠ <div><b>Thị trường chưa xác nhận xu hướng tăng:</b> VN-Index ${fmt(V.p, 2)} đang dưới MA50 (${pc(V.m50)}). Hệ thống tạm dừng tín hiệu MUA mới; các mã có setup đẹp được đưa vào nhóm “chờ xác nhận”. Ưu tiên giữ tỷ trọng tiền mặt cao, giải ngân thăm dò nếu có.</div></div>`;
+  : `<div class="banner warn">⚠ <div><b>Thị trường chưa xác nhận xu hướng tăng:</b> VN-Index ${fmt(V.p, 2)} đang dưới MA50 (${pc(V.m50)}). Hệ thống tạm dừng tín hiệu MUA mới; các mã có setup đẹp được đưa vào nhóm “chờ xác nhận”. Ưu tiên giữ tỷ trọng tiền mặt cao, giải ngân thăm dò nếu có.</div></div>`);
 const cnt = rec => rows.filter(r => r.rec === rec).length;
 const setups = rows.filter(r => flags(r).includes('MKW'));
 $('#kpis').innerHTML = `
@@ -395,12 +443,18 @@ $('#foot').innerHTML = `Cập nhật lúc ${new Date(D.gen).toLocaleString('vi-V
 // Router
 function route() {
   const v = (location.hash || '#tin-hieu').slice(1);
-  const ok = ['tin-hieu', 'bo-loc', 'theo-doi', 'phuong-phap'].includes(v) ? v : 'tin-hieu';
+  const ok = ['tin-hieu', 'bo-loc', 'theo-doi', 'hieu-qua', 'phuong-phap', 'tai-khoan'].includes(v) ? v : 'tin-hieu';
   document.querySelectorAll('.view').forEach(x => x.classList.toggle('on', x.id === 'v-' + ok));
   document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.v === ok));
   if (ok === 'theo-doi') renderWL();
+  if (ok === 'hieu-qua') Cloud.renderPerf();
+  if (ok === 'tai-khoan') Cloud.renderAccount();
 }
+window.openDrawer = openDrawer;
 addEventListener('hashchange', route); route();
+} // main
+
+boot();
 </script>
 </body>
 </html>

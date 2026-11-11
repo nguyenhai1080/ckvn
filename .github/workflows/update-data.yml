@@ -4,27 +4,48 @@ on:
   schedule:
     - cron: '45 8 * * 1-5'   # 15:45 giờ Việt Nam, thứ 2–6
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Chạy cả khi không có phiên mới (--force)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      RESEND_FROM: ${{ secrets.RESEND_FROM }}
+      SITE_URL: ${{ vars.SITE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Kiểm thử logic
+        run: node --test tests/*.test.mjs
+
       - name: Lấy dữ liệu & tính tín hiệu
         id: run
         run: |
           set +e
-          node scripts/update-data.mjs
+          node scripts/update-data.mjs ${{ inputs.force && '--force' || '' }}
           code=$?
           if [ $code -eq 2 ]; then echo "skip=1" >> $GITHUB_OUTPUT; exit 0; fi
           exit $code
+
       - name: Commit data.js
         if: steps.run.outputs.skip != '1'
         run: |
@@ -34,3 +55,7 @@ jobs:
           git diff --cached --quiet && echo "Không có thay đổi" && exit 0
           git commit -m "data: phiên $(date -u -d '+7 hours' +%d/%m/%Y)"
           git push
+
+      - name: Đồng bộ Supabase, theo dõi tín hiệu, gửi cảnh báo
+        if: steps.run.outputs.skip != '1'
+        run: node scripts/sync-supabase.mjs
