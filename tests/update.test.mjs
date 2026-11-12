@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldRun, asofOf, vnDate, computeData } from '../scripts/lib/update.mjs';
+import { shouldRun, sessionInfo, asofOf, vnDate, computeData } from '../scripts/lib/update.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Giờ VN → mốc thời gian UTC
@@ -13,23 +13,43 @@ test('vnDate đổi sang ngày Việt Nam', () => {
   assert.equal(vnDate(vn('2026-11-12', '15:45')), '2026-11-12');
 });
 
-test('shouldRun: chỉ thứ 2–6, 15:45–18:00, chưa có phiên hôm nay', () => {
-  const st = { asof: '2026-11-11' };
-  assert.equal(shouldRun(vn('2026-11-12', '15:44'), st), false);
-  assert.equal(shouldRun(vn('2026-11-12', '15:45'), st), true);   // thứ 5
-  assert.equal(shouldRun(vn('2026-11-12', '17:59'), st), true);
-  assert.equal(shouldRun(vn('2026-11-12', '18:00'), st), false);
-  assert.equal(shouldRun(vn('2026-11-14', '16:00'), st), false);  // thứ 7
-  assert.equal(shouldRun(vn('2026-11-15', '16:00'), st), false);  // chủ nhật
-  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { asof: '2026-11-12' }), false); // đã có phiên
-  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { ...st, running: true }), false);
-  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { ...st, skipDate: '2026-11-12' }), false); // ngày nghỉ
+test('shouldRun: bản chốt thứ 2–6, 15:45–18:00, chưa có bản chốt hôm nay', () => {
+  const st = { asof: '2026-11-11', finalAsof: '2026-11-11' };
+  assert.equal(shouldRun(vn('2026-11-12', '15:44'), st), null);
+  assert.equal(shouldRun(vn('2026-11-12', '15:45'), st), 'final');   // thứ 5
+  assert.equal(shouldRun(vn('2026-11-12', '17:59'), st), 'final');
+  assert.equal(shouldRun(vn('2026-11-12', '18:00'), st), null);
+  assert.equal(shouldRun(vn('2026-11-14', '16:00'), st), null);      // thứ 7
+  assert.equal(shouldRun(vn('2026-11-15', '10:00'), st), null);      // chủ nhật, kể cả trong giờ
+  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { finalAsof: '2026-11-12' }), null);
+  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { ...st, asof: '2026-11-12' }), 'final', 'bản tạm tính hôm nay không thay được bản chốt');
+  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { ...st, running: true }), null);
+  assert.equal(shouldRun(vn('2026-11-12', '16:00'), { ...st, skipDate: '2026-11-12' }), null);
+  const tried = { ...st, lastFinalAttempt: vn('2026-11-12', '15:45') };
+  assert.equal(shouldRun(vn('2026-11-12', '16:04'), tried), null);
+  assert.equal(shouldRun(vn('2026-11-12', '16:05'), tried), 'final');
 });
 
-test('shouldRun: thử lại cách nhau ≥ 20 phút', () => {
-  const st = { asof: '2026-11-11', lastAttempt: vn('2026-11-12', '15:45') };
-  assert.equal(shouldRun(vn('2026-11-12', '16:04'), st), false);
-  assert.equal(shouldRun(vn('2026-11-12', '16:05'), st), true);
+test('shouldRun: trong phiên mỗi N phút, nghỉ trưa và ngoài giờ thì không', () => {
+  const st = { finalAsof: '2026-11-11' };
+  for (const [hm, want] of [['09:14', null], ['09:15', 'live'], ['11:35', 'live'], ['11:36', null], ['12:30', null],
+    ['13:04', null], ['13:05', 'live'], ['14:55', 'live'], ['14:56', null], ['15:30', null]])
+    assert.equal(shouldRun(vn('2026-11-12', hm), st), want, hm);
+  const last = { ...st, lastAttempt: vn('2026-11-12', '10:00') };
+  assert.equal(shouldRun(vn('2026-11-12', '10:09'), last), null);
+  assert.equal(shouldRun(vn('2026-11-12', '10:10'), last), 'live');
+  assert.equal(shouldRun(vn('2026-11-12', '10:05'), last, { intervalMin: 5 }), 'live');
+  assert.equal(shouldRun(vn('2026-11-12', '10:30'), st, { intervalMin: 0 }), null, '0 = tắt cập nhật trong phiên');
+  assert.equal(shouldRun(vn('2026-11-12', '10:30'), { ...st, skipDate: '2026-11-12' }), null, 'ngày nghỉ');
+});
+
+test('sessionInfo: tỷ lệ thời gian giao dịch đã trôi qua', () => {
+  assert.equal(sessionInfo(vn('2026-11-12', '09:00')).fraction, 0);
+  assert.equal(sessionInfo(vn('2026-11-12', '11:30')).fraction, 150 / 255);
+  assert.equal(sessionInfo(vn('2026-11-12', '12:15')).fraction, 150 / 255);   // nghỉ trưa
+  assert.equal(sessionInfo(vn('2026-11-12', '14:45')).fraction, 1);
+  assert.equal(sessionInfo(vn('2026-11-12', '12:15')).intraday, true);
+  assert.equal(sessionInfo(vn('2026-11-12', '15:30')).intraday, false);
 });
 
 test('asofOf đọc ngày từ data.js', () => {
@@ -127,4 +147,25 @@ test('cả hai nguồn đều hỏng → lỗi rõ ràng kèm thống kê reques
   const fetchImpl = async url => /dchart|_prices/.test(url) ? new Response('nope', { status: 403 }) : fakeVndirect().fetchImpl(url);
   await assert.rejects(computeData({ engineFile: path.join(ROOT, 'engine.js'), fetchImpl, now: vn('2026-11-12', '16:00') }),
     e => /Không lấy được lịch sử VN-Index \(nguồn finfo\)/.test(e.message) && /dchart-api\.vndirect\.com\.vn/.test(e.message));
+});
+
+test('mode live: lấy nến hôm nay, ước tính khối lượng cả phiên, gắn nhãn tạm tính', async () => {
+  const { fetchImpl } = fakeVndirect();
+  const fin = await computeData({ engineFile: path.join(ROOT, 'engine.js'), fetchImpl, now: vn('2026-11-12', '16:00') });
+  const live = await computeData({ engineFile: path.join(ROOT, 'engine.js'), fetchImpl, now: vn('2026-11-12', '10:00'), mode: 'live' });
+  assert.equal(live.asof, '2026-11-12'); assert.ok(live.live); assert.equal(live.live.fraction, 0.24);
+  assert.match(live.data, /"live":\{"at":"2026-11-12T03:00:00.000Z"/);
+  assert.doesNotMatch(fin.data, /"live"/);
+  const rows = d => { const g = {}; new Function('window', d)(g); const K = g.DATA.k; return Object.fromEntries(g.DATA.r.map(r => [r[0], Object.fromEntries(K.map((k, i) => [k, r[i]]))])); };
+  const a = rows(fin.data), b = rows(live.data);
+  // cùng giá, nhưng tỷ lệ khối lượng (vr) của bản tạm tính = bản chốt × 1/0,24 (khối lượng hôm nay được ước tính cả phiên)
+  const s = Object.keys(a)[0];
+  assert.equal(b[s].p, a[s].p);
+  assert.ok(Math.abs(b[s].vr / a[s].vr - 255 / 60) < 0.05, `vr ${a[s].vr} → ${b[s].vr}`);
+});
+
+test('mode live vào ngày nghỉ: không có nến hôm nay → không gắn nhãn tạm tính', async () => {
+  const { fetchImpl } = fakeVndirect({ lastDay: '2026-11-11' });
+  const r = await computeData({ engineFile: path.join(ROOT, 'engine.js'), fetchImpl, now: vn('2026-11-12', '10:00'), mode: 'live' });
+  assert.equal(r.asof, '2026-11-11'); assert.equal(r.live, null); assert.doesNotMatch(r.data, /"live"/);
 });

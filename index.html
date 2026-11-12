@@ -102,6 +102,11 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
 .day select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink)}
 .banner.old{background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
 .banner.old a{color:var(--accent);font-weight:600}
+.banner.live{background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 40%,transparent)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-top:5px;flex:none;animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.newdata{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:15;display:flex;gap:10px;align-items:center;background:var(--ink);color:var(--surface);padding:8px 10px 8px 14px;border-radius:99px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.18);max-width:calc(100% - 32px)}
+.newdata button{font:inherit;font-size:13px;font-weight:600;border:0;border-radius:99px;padding:5px 12px;background:var(--surface);color:var(--ink);cursor:pointer}
 .perf-kpis{grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:12px}
 .acc-grid{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .acc{max-width:520px}.acc h2{margin-bottom:8px}.acc p{margin:6px 0}
@@ -184,6 +189,7 @@ tbody tr{cursor:pointer}tbody tr:hover{background:var(--surface-2)}
   <section class="view method" id="v-phuong-phap">
     <div class="card">
       <h2>Cách hệ thống ra khuyến nghị</h2>
+      <p>Trong giờ giao dịch, dữ liệu được cập nhật khoảng 10 phút/lần và chỉ mang tính <b>tạm tính</b> (nến chưa đóng; khối lượng hôm nay được ước tính cho cả phiên theo thời gian đã giao dịch, nên đầu phiên có thể sai lệch nhiều). Lịch sử, theo dõi hiệu quả và cảnh báo chỉ dùng bản chốt sau 15:45.</p>
       <p>Mỗi ngày sau giờ đóng cửa, hệ thống lấy giá ~1 năm và chỉ số tài chính của các cổ phiếu có <b>giá trị giao dịch trung bình 20 phiên ≥ 10 tỷ đồng</b> trên HOSE, HNX, UPCoM, rồi chấm điểm.</p>
       <h3>1. Điều kiện thị trường</h3>
       <p>Tín hiệu MUA chỉ được phát khi <b>VN-Index nằm trên đường MA50</b>. Kiểm định một năm qua cho thấy các setup mua khi thị trường dưới MA50 kém hiệu quả rõ rệt.</p>
@@ -233,6 +239,34 @@ async function boot() {
   }
   main(D);
   Cloud.init({ asof: D.asof, latest: window.DATA.asof });
+  if (D === window.DATA) watchForNewData(D.gen);
+}
+
+// Khi chạy trên server (VibeHost), /status cho biết đã có dữ liệu mới chưa → hiện nút "Tải lại".
+// Trên trang tĩnh không có /status thì tự dừng.
+function watchForNewData(gen) {
+  let timer = null, shown = false;
+  const check = async () => {
+    if (document.visibilityState !== 'visible' || shown) return;
+    try {
+      const r = await fetch('/status', { cache: 'no-store' });
+      if (!r.ok) return stop();
+      const s = await r.json();
+      if (!s || typeof s !== 'object' || !('gen' in s)) return stop();
+      if (s.gen && gen && s.gen !== gen && !s.running) {
+        shown = true;
+        const bar = document.createElement('div');
+        bar.className = 'newdata'; bar.setAttribute('role', 'status');
+        const t = new Date(s.gen).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+        bar.innerHTML = `<span>Đã có dữ liệu ${s.live ? 'trong phiên' : 'mới'} lúc ${t}</span><button type="button">Tải lại</button>`;
+        bar.querySelector('button').onclick = () => location.reload();
+        document.body.append(bar);
+      }
+    } catch (e) { /* mạng chập chờn: thử lại lần sau */ }
+  };
+  const stop = () => clearInterval(timer);
+  timer = setInterval(check, 60_000);
+  document.addEventListener('visibilitychange', check);
 }
 
 function main(D) {
@@ -264,7 +298,8 @@ Cloud.bindWatchlist({ get: () => WL, set: list => { WL = [...new Set(list)]; sav
 // Header + market
 const V = D.vni;
 $('#sub').innerHTML = `Dữ liệu phiên <b>${D.asof.split('-').reverse().join('/')}</b> · ${rows.length} cổ phiếu thanh khoản ≥ 10 tỷ/phiên · Nguồn: VNDirect`;
-$('#banner').innerHTML = (LATEST ? '' : `<div class="banner old">🕘 <div>Đang xem dữ liệu phiên <b>${D.asof.split('-').reverse().join('/')}</b> (phiên cũ). Giá và tín hiệu là của ngày đó. <a href="${location.pathname}${location.hash}">Về phiên mới nhất →</a></div></div>`) + (V.ok
+const hhmm = iso => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' });
+$('#banner').innerHTML = (D.live ? `<div class="banner live"><span class="dot" aria-hidden="true"></span><div><b>Dữ liệu trong phiên, cập nhật lúc ${hhmm(D.live.at)}</b> (tự cập nhật khoảng 10 phút/lần trong giờ giao dịch). Giá và tín hiệu là <b>tạm tính</b>; khối lượng hôm nay được ước tính cho cả phiên theo thời gian đã giao dịch (${Math.round(D.live.fraction * 100)}%). Tín hiệu chốt sau 15:45.</div></div>` : '') + (LATEST ? '' : `<div class="banner old">🕘 <div>Đang xem dữ liệu phiên <b>${D.asof.split('-').reverse().join('/')}</b> (phiên cũ). Giá và tín hiệu là của ngày đó. <a href="${location.pathname}${location.hash}">Về phiên mới nhất →</a></div></div>`) + (V.ok
   ? `<div class="banner ok">✔ <div><b>Thị trường thuận lợi:</b> VN-Index trên MA50 – các tín hiệu MUA đang được kích hoạt.</div></div>`
   : `<div class="banner warn">⚠ <div><b>Thị trường chưa xác nhận xu hướng tăng:</b> VN-Index ${fmt(V.p, 2)} đang dưới MA50 (${pc(V.m50)}). Hệ thống tạm dừng tín hiệu MUA mới; các mã có setup đẹp được đưa vào nhóm “chờ xác nhận”. Ưu tiên giữ tỷ trọng tiền mặt cao, giải ngân thăm dò nếu có.</div></div>`);
 const cnt = rec => rows.filter(r => r.rec === rec).length;
@@ -273,7 +308,7 @@ $('#kpis').innerHTML = `
   <div class="card mkt"><div><div class="k-label">VN-Index</div><div class="k-val">${fmt(V.p, 2)}</div>
     <div class="k-note">${pc(V.d1, 2)} hôm nay · ${pc(V.d20, 1)} 20 phiên · RSI ${fmt(V.rsi)}</div></div>
     <div class="chart" id="vni-chart"></div></div>
-  <div class="card"><div class="k-label">▲ Mua</div><div class="k-val">${cnt('MUA')}</div><div class="k-note">tín hiệu mới</div></div>
+  <div class="card"><div class="k-label">▲ Mua</div><div class="k-val">${cnt('MUA')}</div><div class="k-note">${D.live ? 'tạm tính trong phiên' : 'tín hiệu mới'}</div></div>
   <div class="card"><div class="k-label">● Chờ xác nhận</div><div class="k-val">${setups.length}</div><div class="k-note">setup mua, thị trường yếu</div></div>
   <div class="card"><div class="k-label">▼ Bán / chốt lời</div><div class="k-val">${cnt('BÁN') + cnt('CHỐT LỜI')}</div><div class="k-note">cảnh báo</div></div>
   <div class="card"><div class="k-label">Backtest 1 năm</div><div class="k-val">${pc(D.bt.avg, 2)}</div><div class="k-note">TB/lệnh 10 phiên · thắng ${fmt(D.bt.win)}%</div></div>`;

@@ -131,5 +131,34 @@ const shot = async (p, name) => SHOTS && p.screenshot({ path: path.join(SHOTS, n
       console.log('✔ điện thoại 390px');
       await ctx.close();
     }
+    // ---- 4. Server thật (server.mjs) với dữ liệu trong phiên + báo có dữ liệu mới ----
+    {
+      const NPORT = 8767, NBASE = `http://localhost:${NPORT}/`, H = { Authorization: 'Bearer t0k3n' };
+      const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'lsck-'));
+      const node = spawn(process.execPath, ['server.mjs'], { cwd: ROOT, stdio: 'ignore',
+        env: { ...process.env, PORT: String(NPORT), AUTO_UPDATE: '0', UPDATE_TOKEN: 't0k3n', DATA_DIR: tmp, ENGINE_FILE: path.join(__dirname, 'fake-engine.js') } });
+      try {
+        await new Promise(r => setTimeout(r, 1200));
+        const live = await (await fetch(NBASE + 'admin/update?mode=live', { method: 'POST', headers: H })).json();
+        assert.equal(live.live, true);
+        const { p, errors, ctx } = await page(browser, { cloud: false });
+        await p.goto(NBASE + '#tin-hieu'); await p.waitForSelector('.banner.live');
+        assert.match(await p.textContent('.banner.live'), /Dữ liệu trong phiên, cập nhật lúc \d\d:\d\d/);
+        assert.match(await p.textContent('#kpis'), /tạm tính trong phiên/);
+        await shot(p, 'live');
+        assert.equal(await p.locator('.newdata').count(), 0);
+        await new Promise(r => setTimeout(r, 1100)); // gen khác nhau
+        await fetch(NBASE + 'admin/update', { method: 'POST', headers: H }); // bản chốt
+        await p.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+        await p.waitForSelector('.newdata');
+        assert.match(await p.textContent('.newdata'), /Đã có dữ liệu mới lúc/);
+        await Promise.all([p.waitForNavigation(), p.click('.newdata button')]);
+        await p.waitForSelector('#setup .sig');
+        assert.equal(await p.locator('.banner.live').count(), 0, 'bản chốt không còn banner tạm tính');
+        assert.deepEqual(errors, []);
+        console.log('✔ server thật: banner tạm tính, báo dữ liệu mới, tải lại ra bản chốt');
+        await ctx.close();
+      } finally { node.kill(); }
+    }
   } finally { await browser.close(); srv.kill(); }
 })().catch(e => { console.error(e); process.exit(1); });

@@ -58,6 +58,11 @@ for (let i = 0; i < syms.length; i += 10) {
   }));
 }
 if (!hist.VNINDEX) throw new Error(`Không lấy được lịch sử VN-Index (nguồn ${priceSource})`);
+// Trong phiên: khối lượng nến hôm nay mới là một phần → ước tính cho cả phiên (window.__liveScale, window.__today)
+if (window.__liveScale > 1 && window.__today) for (const h of Object.values(hist)) {
+  const k = h.t.length - 1;
+  if (ymd(h.t[k]) === window.__today) h.v[k] = Math.round(h.v[k] * window.__liveScale);
+}
 
 // 4. Chỉ báo
 const sma = (a, n) => a.map((_, i) => i < n - 1 ? null : a.slice(i - n + 1, i + 1).reduce((x, y) => x + y, 0) / n);

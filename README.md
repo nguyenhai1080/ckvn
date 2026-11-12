@@ -39,8 +39,14 @@ VibeHost: chọn repo, nhánh `main`. VibeHost nhận diện đây là app Node 
 (không cần thư viện, nghe cổng `PORT`, health check ở `/healthz`). Không có lệnh build. Nhớ bật chế độ công khai.
 **Phải chạy ở chế độ Node (không chọn "Static site")** vì server tự cập nhật dữ liệu mỗi ngày.
 
-Server tự lấy dữ liệu VNDirect lúc 15:45 giờ VN thứ 2–6 (thử lại mỗi 20 phút đến 18:00; sau 16:30 chưa có phiên → coi là ngày nghỉ),
-và chạy bù ngay sau mỗi lần khởi động / deploy. Xem tình trạng tại `SITE_URL/status`.
+Server tự lấy dữ liệu VNDirect, thứ 2–6, giờ VN:
+- **Trong phiên** (9:15–11:35 và 13:05–14:55): mỗi 10 phút (`INTRADAY_MINUTES`) → dữ liệu **tạm tính**; khối lượng hôm nay được ước tính
+  cho cả phiên theo thời gian đã giao dịch. Bản tạm tính không lưu lịch sử, không gửi cảnh báo. Trang đang mở sẽ hiện nút "Tải lại" khi có dữ liệu mới.
+- **15:45**: bản **chốt** của phiên (thử lại mỗi 20 phút đến 18:00) → lưu Supabase, cập nhật hiệu quả tín hiệu, gửi cảnh báo.
+- Ngày nghỉ: 10:00 (hoặc 16:30) vẫn chưa có nến hôm nay → ngừng cập nhật hôm đó.
+- Chạy bù ngay sau mỗi lần khởi động / deploy. Xem tình trạng tại `SITE_URL/status`.
+
+Mỗi lần chạy ~160 request tới api-finfo trong ~45 giây; 10 phút/lần ≈ 25 lần/ngày.
 Ghi lại địa chỉ trang, VD `https://luot-song-ck.vibehost.app/` (dùng ở các bước sau, gọi là `SITE_URL`).
 
 ### 2. Supabase
@@ -88,8 +94,9 @@ Trong cài đặt dự án VibeHost (Environment variables), thêm:
 | `RESEND_API_KEY` | API key Resend |
 | `RESEND_FROM` | VD `Lướt sóng CK <canhbao@ten-mien.vn>` |
 | `SITE_URL` | địa chỉ trang |
-| `UPDATE_TOKEN` | (tuỳ chọn) chuỗi ngẫu nhiên dài, để chạy tay: `curl -X POST -H "Authorization: Bearer <token>" SITE_URL/admin/update` |
-| `AUTO_UPDATE` | (tuỳ chọn) `0` để tắt tự cập nhật |
+| `UPDATE_TOKEN` | (tuỳ chọn) chuỗi ngẫu nhiên dài, để chạy tay: `curl -X POST -H "Authorization: Bearer <token>" SITE_URL/admin/update` (thêm `?mode=live` để chạy bản tạm tính) |
+| `AUTO_UPDATE` | (tuỳ chọn) `0` để tắt mọi tự cập nhật |
+| `INTRADAY_MINUTES` | (tuỳ chọn) chu kỳ cập nhật trong phiên, mặc định `10`, tối thiểu `5`; `0` = chỉ cập nhật bản chốt 15:45 |
 
 Sau khi lưu biến, deploy lại: server chạy bù ngay khi khởi động và tạo phiên đầu tiên trong Supabase.
 
@@ -110,7 +117,7 @@ Chạy: **Actions → Cập nhật dữ liệu (dự phòng, chạy tay) → Run
 
 ## Cách hoạt động mỗi ngày
 
-1. 15:45 `server.mjs` trên VibeHost chạy `engine.js` → có phiên mới thì thay dữ liệu đang phục vụ ngay (không cần deploy lại).
+1. Trong phiên, `server.mjs` chạy `engine.js` mỗi 10 phút (tạm tính); 15:45 chạy bản chốt → thay dữ liệu đang phục vụ ngay (không cần deploy lại).
 2. Nếu có biến Supabase, server chạy `sync-supabase.mjs`:
    - lưu phiên vào bảng `snapshots` (cho tính năng xem phiên cũ)
    - cập nhật các lệnh đang theo dõi trong `trades` theo giá cao/thấp/đóng cửa mới; mở lệnh mới cho mã có tín hiệu MUA hoặc setup chờ xác nhận
