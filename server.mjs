@@ -81,12 +81,12 @@ async function update(reason) {
       const hm = new Date(Date.now() + 7 * 3600e3).toISOString().slice(11, 16);
       if (hm >= '16:30') st.skipDate = today;
     }
-    st.lastResult = { at: new Date().toISOString(), reason, asof: res.asof, rows: res.rows, newer, seconds: sec };
+    st.lastResult = { at: new Date().toISOString(), reason, asof: res.asof, rows: res.rows, newer, seconds: sec, priceSource: res.source, requests: res.stats };
     st.lastError = null;
     log(`Xong sau ${sec}s: phiên ${res.asof}, ${res.rows} mã${newer ? ' (MỚI)' : ' (không đổi)'}`);
     return { ok: true, ...st.lastResult };
   } catch (e) {
-    st.lastError = { at: new Date().toISOString(), reason, message: e.message };
+    st.lastError = { at: new Date().toISOString(), reason, message: String(e.message).slice(0, 1500) };
     log('Lỗi cập nhật:', e);
     return { ok: false, message: e.message };
   } finally {

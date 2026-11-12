@@ -30,15 +30,34 @@ const indr = await j(`${F}/industry_classification?q=industryLevel:2&size=200`);
 const ind = {};
 for (const d of indr.data) for (const c of (d.codeList || '').split(',')) if (c) ind[c] = d.vietnameseName;
 
-// 3. Giá
-const to = Math.floor(Date.now() / 1000), from = to - 420 * 86400;
+// 3. Giá (đã điều chỉnh). Nguồn chính: dchart; nếu dchart không dùng được (VD bị chặn từ máy chủ) → api-finfo.
+// window.__to (giây, tuỳ chọn): bỏ các nến sau mốc này — dùng để loại nến đang giao dịch dở trong ngày.
+const to = window.__to || Math.floor(Date.now() / 1000), from = to - 420 * 86400;
+const ymd = t => new Date(t * 1000).toISOString().slice(0, 10);
+const dchart = async s => {
+  const h = await j(`https://dchart-api.vndirect.com.vn/dchart/history?resolution=D&symbol=${s}&from=${from}&to=${to}`);
+  if (!h || h.s !== 'ok' || !Array.isArray(h.t)) throw new Error('dchart ' + (h && h.s));
+  const keep = h.t.map((t, i) => t <= to ? i : -1).filter(i => i >= 0);
+  return { s: 'ok', t: keep.map(i => h.t[i]), o: keep.map(i => h.o[i]), h: keep.map(i => h.h[i]), l: keep.map(i => h.l[i]), c: keep.map(i => h.c[i]), v: keep.map(i => h.v[i]) };
+};
+const finfo = async s => {
+  const idx = s === 'VNINDEX';
+  const r = await j(`${F}/${idx ? 'vnmarket_prices' : 'stock_prices'}?sort=date&q=code:${s}~date:gte:${ymd(from)}~date:lte:${ymd(to)}&size=500`);
+  const d = (r.data || []).slice().reverse().filter(x => { const t = Date.parse(x.date + 'T00:00:00Z') / 1000; return t >= from && t <= to; });
+  const k = idx ? ['open', 'high', 'low', 'close', 'nmVolume'] : ['adOpen', 'adHigh', 'adLow', 'adClose', 'nmVolume'];
+  return { s: 'ok', t: d.map(x => Date.parse(x.date + 'T00:00:00Z') / 1000), o: d.map(x => x[k[0]]), h: d.map(x => x[k[1]]), l: d.map(x => x[k[2]]), c: d.map(x => x[k[3]]), v: d.map(x => x[k[4]]) };
+};
+let src = dchart, priceSource = 'dchart';
+try { const v = await dchart('VNINDEX'); if (v.t.length < 60) throw new Error('dchart thiếu dữ liệu'); }
+catch (e) { src = finfo; priceSource = 'finfo'; }
 const hist = {};
 const syms = [...uni, 'VNINDEX'];
 for (let i = 0; i < syms.length; i += 10) {
   await Promise.all(syms.slice(i, i + 10).map(async s => {
-    try { const h = await j(`https://dchart-api.vndirect.com.vn/dchart/history?resolution=D&symbol=${s}&from=${from}&to=${to}`); if (h.s === 'ok' && h.t.length > 60) hist[s] = h; } catch (e) {}
+    try { const h = await src(s); if (h.t.length > 60) hist[s] = h; } catch (e) {}
   }));
 }
+if (!hist.VNINDEX) throw new Error(`Không lấy được lịch sử VN-Index (nguồn ${priceSource})`);
 
 // 4. Chỉ báo
 const sma = (a, n) => a.map((_, i) => i < n - 1 ? null : a.slice(i - n + 1, i + 1).reduce((x, y) => x + y, 0) / n);
@@ -155,11 +174,11 @@ for (const s of pick) { const h = hist[s]; charts[s] = [h.c.slice(-60), h.v.slic
 const VA = analyze(V), vi = VA.n - 1;
 bt.rets.sort((a, b) => a - b);
 window.__result = {
-  asof: new Date(lastT * 1000).toISOString().slice(0, 10), gen: new Date().toISOString(),
+  asof: new Date(lastT * 1000).toISOString().slice(0, 10), gen: new Date().toISOString(), src: priceSource,
   vni: { ok: vc[vi] >= vm50[vi] ? 1 : 0, p: r2(vc[vi]), d1: r2(pct(vc[vi], vc[vi - 1])), d20: r2(pct(vc[vi], vc[vi - 20])), rsi: r1(VA.rsi[vi]), m20: r1(pct(vc[vi], VA.m20[vi])), m50: r1(pct(vc[vi], VA.m50[vi])), c: vc.slice(-60).map(r2), t: V.t.slice(-60).map(x => new Date(x * 1000).toISOString().slice(5, 10)) },
   bt: { n: bt.n, win: r1(bt.win / bt.n * 100), avg: r2(bt.sum / bt.n), med: r2(bt.rets[Math.floor(bt.n / 2)]), base: r2(base.sum / base.n) },
   st: { k: Object.keys(out[0]), r: out.map(o => Object.values(o)) }, ch: charts
 };
 window.__json = JSON.stringify(window.__result);
-return { len: window.__json.length, n: out.length, charts: Object.keys(charts).length, size: JSON.stringify(window.__result).length, bt: window.__result.bt, recs: out.reduce((m, x) => (m[x.rec] = (m[x.rec] || 0) + 1, m), {}) };
+return { src: priceSource, len: window.__json.length, n: out.length, charts: Object.keys(charts).length, size: JSON.stringify(window.__result).length, bt: window.__result.bt, recs: out.reduce((m, x) => (m[x.rec] = (m[x.rec] || 0) + 1, m), {}) };
 })()

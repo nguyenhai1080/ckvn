@@ -29,23 +29,46 @@ export async function vndFetch(url, opts = {}) {
   }
 }
 
+/** Mốc cắt nến: trước 15:30 giờ VN, phiên hôm nay chưa chốt → chỉ lấy đến hết hôm qua */
+export function cutoffFor(now = Date.now()) {
+  const v = vnTime(now), mins = v.getUTCHours() * 60 + v.getUTCMinutes();
+  return mins < 15 * 60 + 30 ? Date.parse(vnDate(now) + 'T00:00:00Z') / 1000 - 1 : Math.floor(now / 1000);
+}
+
 /**
- * Chạy engine và trả về { asof, gen, rows, data (chuỗi data.js), summary }.
+ * Chạy engine và trả về { asof, gen, rows, data (chuỗi data.js), summary, source, stats }.
  * engine.js được chạy với `window` và `fetch` riêng, không ảnh hưởng biến toàn cục của tiến trình.
  */
-export async function computeData({ engineFile, fetchImpl = vndFetch }) {
+export async function computeData({ engineFile, fetchImpl = vndFetch, now = Date.now() }) {
   const src = await readFile(engineFile, 'utf8');
-  const win = {};
-  const summary = await new Function('window', 'fetch', `return (\n${src}\n);`)(win, fetchImpl);
+  const win = { __to: cutoffFor(now) };
+  // Thống kê request theo host để chẩn đoán khi lỗi (hiện ở /status)
+  const stats = {};
+  const counted = async (url, opts) => {
+    const host = new URL(url).hostname, s = (stats[host] ??= { ok: 0, fail: 0 });
+    try {
+      const res = await fetchImpl(url, opts);
+      if (res.ok) s.ok++; else { s.fail++; s.lastStatus = res.status; }
+      return res;
+    } catch (e) { s.fail++; s.lastError = String(e.message || e).slice(0, 200); throw e; }
+  };
+  let summary;
+  try {
+    summary = await new Function('window', 'fetch', `return (\n${src}\n);`)(win, counted);
+  } catch (e) {
+    e.message += ' · request: ' + JSON.stringify(stats);
+    e.stats = stats;
+    throw e;
+  }
   const R = win.__result;
   if (!R?.st?.r) throw new Error('Engine không trả về kết quả');
-  if (R.st.r.length < 50) throw new Error(`Chỉ có ${R.st.r.length} mã — nghi lỗi dữ liệu, không dùng.`);
+  if (R.st.r.length < 50) throw new Error(`Chỉ có ${R.st.r.length} mã — nghi lỗi dữ liệu, không dùng. request: ${JSON.stringify(stats)}`);
   const r2 = x => Math.round(x * 100) / 100;
   const data = 'window.DATA=' + JSON.stringify({
     asof: R.asof, gen: R.gen, vni: R.vni, bt: R.bt, k: R.st.k, r: R.st.r,
     ch: Object.fromEntries(Object.entries(R.ch).map(([s, [c]]) => [s, c.map(r2)])),
   }) + ';';
-  return { asof: R.asof, gen: R.gen, rows: R.st.r.length, data, summary };
+  return { asof: R.asof, gen: R.gen, rows: R.st.r.length, data, summary, source: R.src, stats };
 }
 
 /** Đọc asof từ nội dung data.js mà không cần chạy nó */
