@@ -43,7 +43,7 @@ const write = async (label, fn) => (DRY ? console.log(`[dry-run] ${label}`) : fn
 
 // ---------- 1. Snapshot phiên hôm nay ----------
 globalThis.window = {};
-await import(pathToFileURL(path.join(root, 'data.js')).href + `?t=${Date.now()}`);
+await import(pathToFileURL(process.env.DATA_FILE || path.join(root, 'data.js')).href + `?t=${Date.now()}`);
 const D = window.DATA;
 console.log(`Phiên ${D.asof}: ${D.r.length} mã`);
 await write(`upsert snapshot ${D.asof}`, () =>

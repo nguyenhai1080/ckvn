@@ -1,8 +1,10 @@
-name: Cập nhật dữ liệu hằng ngày
+name: Cập nhật dữ liệu (dự phòng, chạy tay)
 
+# Cập nhật hằng ngày do server.mjs trên VibeHost tự chạy lúc 15:45 (máy chủ ở Việt Nam).
+# Workflow này chỉ dùng khi cần chạy tay / dự phòng; khi đẩy code thì chỉ chạy kiểm thử.
 on:
-  schedule:
-    - cron: '45 8 * * 1-5'   # 15:45 giờ Việt Nam, thứ 2–6
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       force:
@@ -38,6 +40,7 @@ jobs:
         run: node --test tests/*.test.mjs
 
       - name: Lấy dữ liệu & tính tín hiệu
+        if: github.event_name == 'workflow_dispatch'
         id: run
         run: |
           set +e
@@ -47,7 +50,7 @@ jobs:
           exit $code
 
       - name: Commit data.js
-        if: steps.run.outputs.skip != '1'
+        if: github.event_name == 'workflow_dispatch' && steps.run.outputs.skip != '1'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
@@ -57,5 +60,5 @@ jobs:
           git push
 
       - name: Đồng bộ Supabase, theo dõi tín hiệu, gửi cảnh báo
-        if: steps.run.outputs.skip != '1'
+        if: github.event_name == 'workflow_dispatch' && steps.run.outputs.skip != '1'
         run: node scripts/sync-supabase.mjs

@@ -16,13 +16,15 @@ Chưa cấu hình Supabase thì trang vẫn chạy bình thường ở chế đ�
 | File | Vai trò |
 |---|---|
 | `index.html`, `cloud.js`, `config.js` | Giao diện; `cloud.js` chứa các tính năng Supabase; `config.js` chứa URL + anon key công khai |
-| `data.js` | Dữ liệu phiên mới nhất, GitHub Actions ghi mỗi ngày |
+| `server.mjs` | Server cho VibeHost: phục vụ trang + **tự cập nhật dữ liệu lúc 15:45** (thứ 2–6) và đồng bộ Supabase |
+| `data.js` | Dữ liệu ban đầu khi khởi động; sau đó server phục vụ dữ liệu mới từ bộ nhớ |
 | `engine.js` | Lấy dữ liệu VNDirect + tính chỉ báo, tín hiệu, backtest |
-| `scripts/update-data.mjs` | Chạy `engine.js` bằng Node, ghi `data.js` |
+| `scripts/lib/update.mjs` | Chạy `engine.js` trong Node + lịch chạy (dùng chung cho server và CLI) |
+| `scripts/update-data.mjs` | Chạy tay: lấy dữ liệu, ghi `data.js` |
 | `scripts/sync-supabase.mjs` | Lưu phiên vào Supabase, cập nhật hiệu quả tín hiệu, gửi cảnh báo |
 | `supabase/schema.sql` | Bảng, bảo mật theo dòng (RLS), hàm liên kết Telegram |
 | `supabase/functions/telegram-webhook/` | Edge Function nhận lệnh `/start`, `/stop` từ bot Telegram |
-| `.github/workflows/update-data.yml` | Chạy 15:45 giờ VN, thứ 2–6 |
+| `.github/workflows/update-data.yml` | Kiểm thử khi đẩy code; chạy tay cập nhật dữ liệu khi cần dự phòng |
 | `tests/` | Kiểm thử logic, đồng bộ, webhook, giao diện |
 
 ## Cài đặt từng bước
@@ -34,8 +36,11 @@ gh repo create luot-song-ck --public --source . --push
 ```
 
 VibeHost: chọn repo, nhánh `main`. VibeHost nhận diện đây là app Node và chạy `npm start` → `server.mjs`
-(server tĩnh không cần thư viện, nghe cổng `PORT`, health check ở `/healthz`). Không có lệnh build. Nhớ bật chế độ công khai.
-Nếu nền tảng cho chọn "Static site" thì cũng được: thư mục xuất bản `.`.
+(không cần thư viện, nghe cổng `PORT`, health check ở `/healthz`). Không có lệnh build. Nhớ bật chế độ công khai.
+**Phải chạy ở chế độ Node (không chọn "Static site")** vì server tự cập nhật dữ liệu mỗi ngày.
+
+Server tự lấy dữ liệu VNDirect lúc 15:45 giờ VN thứ 2–6 (thử lại mỗi 20 phút đến 18:00; sau 16:30 chưa có phiên → coi là ngày nghỉ),
+và chạy bù ngay sau mỗi lần khởi động / deploy. Xem tình trạng tại `SITE_URL/status`.
 Ghi lại địa chỉ trang, VD `https://luot-song-ck.vibehost.app/` (dùng ở các bước sau, gọi là `SITE_URL`).
 
 ### 2. Supabase
@@ -71,9 +76,26 @@ Ghi lại địa chỉ trang, VD `https://luot-song-ck.vibehost.app/` (dùng ở
      -d "secret_token=<chuỗi ngẫu nhiên>" -d 'allowed_updates=["message"]'
    ```
 
-### 5. GitHub Secrets
+### 5. Biến môi trường trên VibeHost
 
-Repo → **Settings → Secrets and variables → Actions**:
+Trong cài đặt dự án VibeHost (Environment variables), thêm:
+
+| Tên | Giá trị |
+|---|---|
+| `SUPABASE_URL` | Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | service_role key (**tuyệt đối không đưa vào config.js**) |
+| `TELEGRAM_BOT_TOKEN` | token bot |
+| `RESEND_API_KEY` | API key Resend |
+| `RESEND_FROM` | VD `Lướt sóng CK <canhbao@ten-mien.vn>` |
+| `SITE_URL` | địa chỉ trang |
+| `UPDATE_TOKEN` | (tuỳ chọn) chuỗi ngẫu nhiên dài, để chạy tay: `curl -X POST -H "Authorization: Bearer <token>" SITE_URL/admin/update` |
+| `AUTO_UPDATE` | (tuỳ chọn) `0` để tắt tự cập nhật |
+
+Sau khi lưu biến, deploy lại: server chạy bù ngay khi khởi động và tạo phiên đầu tiên trong Supabase.
+
+### 6. (Tuỳ chọn) GitHub Secrets cho workflow dự phòng
+
+Chỉ cần nếu muốn chạy tay workflow trên GitHub. Repo → **Settings → Secrets and variables → Actions**:
 
 | Loại | Tên | Giá trị |
 |---|---|---|
@@ -84,12 +106,12 @@ Repo → **Settings → Secrets and variables → Actions**:
 | Secret | `RESEND_FROM` | VD `Lướt sóng CK <canhbao@ten-mien.vn>` |
 | Variable | `SITE_URL` | địa chỉ trang |
 
-Sau đó **Actions → Cập nhật dữ liệu hằng ngày → Run workflow** (tích "force" nếu chạy ngoài giờ) để tạo phiên đầu tiên trong Supabase.
+Chạy: **Actions → Cập nhật dữ liệu (dự phòng, chạy tay) → Run workflow**. Lưu ý VNDirect có thể chặn máy chủ GitHub (ở Mỹ).
 
 ## Cách hoạt động mỗi ngày
 
-1. 15:45 Actions chạy `update-data.mjs` → nếu có phiên mới, commit `data.js` → VibeHost tự deploy.
-2. `sync-supabase.mjs`:
+1. 15:45 `server.mjs` trên VibeHost chạy `engine.js` → có phiên mới thì thay dữ liệu đang phục vụ ngay (không cần deploy lại).
+2. Nếu có biến Supabase, server chạy `sync-supabase.mjs`:
    - lưu phiên vào bảng `snapshots` (cho tính năng xem phiên cũ)
    - cập nhật các lệnh đang theo dõi trong `trades` theo giá cao/thấp/đóng cửa mới; mở lệnh mới cho mã có tín hiệu MUA hoặc setup chờ xác nhận
    - so với phiên trước, gửi cảnh báo cho từng người (chỉ mã trong danh mục của họ, theo loại họ chọn), ghi `alert_log` để không gửi trùng khi chạy lại
@@ -99,7 +121,7 @@ Lịch sử chỉ bắt đầu từ phiên đầu tiên sau khi kết nối Supa
 ## Kiểm thử
 
 ```bash
-node --test tests/*.test.mjs        # logic theo dõi tín hiệu + nội dung cảnh báo
+node --test tests/*.test.mjs        # logic theo dõi tín hiệu, cảnh báo, lịch chạy, engine với API giả lập
 node --test tests/telegram.test.ts  # webhook Telegram (Node ≥ 22.18)
 node tests/sync.e2e.mjs             # luồng đồng bộ với Supabase/Telegram/Resend giả lập
 node tests/ui/run.cjs               # giao diện (cần Playwright + python3)
@@ -108,8 +130,9 @@ node scripts/sync-supabase.mjs --dry-run   # chạy thật với Supabase nhưng
 
 ## Lưu ý
 
-- VNDirect có thể chặn IP máy chủ GitHub (ở Mỹ). Nếu bước lấy dữ liệu lỗi 403/kết nối, chạy
-  `npm run update && node scripts/sync-supabase.mjs` trên máy ở Việt Nam, hoặc dùng self-hosted runner.
+- Dữ liệu mới nằm trong bộ nhớ server; `data.js` trong repo chỉ là dữ liệu khởi động. Sau mỗi lần deploy/restart server tự chạy bù (~1–2 phút),
+  trong lúc đó trang hiển thị dữ liệu trong repo.
+- Nếu VibeHost chạy nhiều bản server cùng lúc, mỗi bản đều tự cập nhật; cảnh báo không bị gửi trùng nhờ `alert_log`.
 - Dữ liệu lấy từ API công khai của VNDirect; hãy kiểm tra điều khoản sử dụng trước khi phát hành rộng rãi.
 - Khi có người dùng đăng ký, bạn đang lưu email của họ: nên thêm trang chính sách bảo mật ngắn và cách xoá tài khoản (Supabase → Authentication → Users → Delete; dữ liệu liên quan tự xoá theo).
 - Đây là công cụ sàng lọc tham khảo, **không phải khuyến nghị đầu tư**.
